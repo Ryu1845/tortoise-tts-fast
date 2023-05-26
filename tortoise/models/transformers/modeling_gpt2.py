@@ -22,7 +22,6 @@ from typing import Optional, Tuple, Union
 import torch
 import torch.utils.checkpoint
 from torch import nn
-from torch.cuda.amp import autocast
 
 from .configuration_gpt2 import GPT2Config
 from . import ModelOutput
@@ -266,8 +265,8 @@ class GPT2Attention(nn.Module):
             present = None
 
         attn_output, attn_weights = self._attn(
-                query, key, value, attention_mask, head_mask
-            )
+            query, key, value, attention_mask, head_mask
+        )
 
         attn_output = self._merge_heads(attn_output, self.num_heads, self.head_dim)
         attn_output = self.c_proj(attn_output)
@@ -362,7 +361,7 @@ class GPT2PreTrainedModel(nn.Module):
     supports_gradient_checkpointing = True
     _no_split_modules = ["GPT2Block"]
 
-    def __init__(self, config:GPT2Config, *inputs, **kwargs):
+    def __init__(self, config: GPT2Config, *inputs, **kwargs):
         self.config = config
         super().__init__()
 
@@ -510,7 +509,7 @@ class GPT2Model(GPT2PreTrainedModel):
         if inputs_embeds is None:
             raise ValueError("You have to specify either input_ids or inputs_embeds")
         input_shape = inputs_embeds.size()[:-1]
-        batch_size = inputs_embeds.shape[0]
+        inputs_embeds.shape[0]
 
         device = input_ids.device if input_ids is not None else inputs_embeds.device
 
@@ -610,7 +609,10 @@ class GPT2Model(GPT2PreTrainedModel):
         )
 
     def get_head_mask(
-            self, head_mask: Optional[torch.Tensor], num_hidden_layers: int, is_attention_chunked: bool = False
+        self,
+        head_mask: Optional[torch.Tensor],
+        num_hidden_layers: int,
+        is_attention_chunked: bool = False,
     ) -> torch.Tensor:
         """
         Prepare the head mask if needed.
@@ -629,4 +631,3 @@ class GPT2Model(GPT2PreTrainedModel):
         """
         head_mask = [None] * num_hidden_layers
         return head_mask
-

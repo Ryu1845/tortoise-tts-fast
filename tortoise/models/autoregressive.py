@@ -4,7 +4,11 @@ import functools
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from .transformers import GPT2Config, GPT2PreTrainedModel, LogitsProcessorList, GPT2Model
+from .transformers import (
+    GPT2Config,
+    LogitsProcessorList,
+    GPT2Model,
+)
 from .transformers import CausalLMOutputWithCrossAttentions
 
 
@@ -16,9 +20,10 @@ def _p(t):
     return t and (len(t), len(t[0]), t[0][0].shape)  # kv_cache debug
 
 
-class GPT2InferenceModel(GPT2PreTrainedModel):
+class GPT2InferenceModel(nn.Module):
     def __init__(self, config, gpt, text_pos_emb, embeddings, norm, linear, kv_cache):
-        super().__init__(config)
+        super().__init__()
+        self.config = config
         self.transformer = gpt
         self.text_pos_embedding = text_pos_emb
         self.embeddings = embeddings
@@ -145,6 +150,88 @@ class GPT2InferenceModel(GPT2PreTrainedModel):
             for layer_past in past
         )
 
+    def generate(
+        self,
+        input_ids,
+        repetition_penalty=2.0,
+        temperature=0.2,
+        top_p=0.8,
+        eos_token_id=None,
+        pad_token_id=None,
+        max_length=250,
+        **kwargs,
+    ):
+        if isinstance(eos_token_id, int):
+            eos_token_id = [eos_token_id]
+        eos_token_id_tensor = (
+            torch.tensor(eos_token_id).to(input_ids.device)
+            if eos_token_id is not None
+            else None
+        )
+        unfinished_sequences = torch.ones(
+            input_ids.shape[0], dtype=torch.long, device=input_ids.device
+        )
+        while True:
+            model_inputs = self.prepare_inputs_for_generation(input_ids)
+            # forward pass to get next token
+            outputs = self(
+                **model_inputs,
+                return_dict=True,
+            )
+            scores = outputs.logits[:, -1, :]
+
+            # top p
+            sorted_logits, sorted_indices = torch.sort(scores, descending=False)
+            cumulative_probs = sorted_logits.softmax(dim=-1).cumsum(dim=-1)
+            # Remove tokens with cumulative top_p above the threshold (token with 0 are kept)
+            sorted_indices_to_remove = cumulative_probs <= (1 - top_p)
+            # scatter sorted tensors to original indexing
+            indices_to_remove = sorted_indices_to_remove.scatter(
+                1, sorted_indices, sorted_indices_to_remove
+            )
+            scores = scores.masked_fill(indices_to_remove, -float("Inf"))
+
+            # temperature
+            scores = scores / temperature
+
+            # repetition penalty
+            score = torch.gather(scores, 1, input_ids)
+            # if score < 0 then repetition penalty has to be multiplied to reduce the previous token probability
+            score = torch.where(
+                score < 0, score * repetition_penalty, score / repetition_penalty
+            )
+            scores.scatter_(1, input_ids, score)
+
+            # sample
+            probs = nn.functional.softmax(scores, dim=-1)
+            next_tokens = torch.multinomial(probs, num_samples=1).squeeze(1)
+
+            # finished sentences should have their next token be a padding token
+            if eos_token_id is not None:
+                if pad_token_id is None:
+                    raise ValueError(
+                        "If `eos_token_id` is defined, make sure that `pad_token_id` is defined."
+                    )
+                next_tokens = next_tokens * unfinished_sequences + pad_token_id * (
+                    1 - unfinished_sequences
+                )
+            # update generated ids, model inputs, and length for next step
+            input_ids = torch.cat([input_ids, next_tokens[:, None]], dim=-1)
+
+            if eos_token_id_tensor is not None:
+                unfinished_sequences = unfinished_sequences.mul(
+                    next_tokens.tile(eos_token_id_tensor.shape[0], 1)
+                    .ne(eos_token_id_tensor.unsqueeze(1))
+                    .prod(dim=0)
+                )
+
+                # stop when each sentence is finished
+                if unfinished_sequences.max() == 0:
+                    break
+            if input_ids.shape[-1] >= max_length:
+                break
+        return input_ids
+
 
 class LearnedPositionEmbeddings(nn.Module):
     def __init__(self, seq_len, model_dim, init=0.02):
@@ -159,38 +246,6 @@ class LearnedPositionEmbeddings(nn.Module):
 
     def get_fixed_embedding(self, ind, dev):
         return self.emb(torch.arange(0, ind, device=dev))[ind - 1 : ind]
-
-
-def build_hf_gpt_transformer(
-    layers, model_dim, heads, max_mel_seq_len, max_text_seq_len, checkpointing
-):
-    """
-    GPT-2 implemented by the HuggingFace library.
-    """
-
-    gpt_config = GPT2Config(
-        vocab_size=256,  # Unused.
-        n_positions=max_mel_seq_len + max_text_seq_len,
-        n_embd=model_dim,
-        n_layer=layers,
-        n_head=heads,
-        use_cache=not checkpointing,
-    )
-    gpt = GPT2Model(gpt_config)
-    # Override the built in positional embeddings
-    del (
-        gpt.wpe
-    )  # TODO: figure out relevance in fixing exported model definition: Embedding(1012, 1024)
-    gpt.wpe = functools.partial(null_position_embeddings, dim=model_dim)
-    # Built-in token embeddings are unused.
-    del gpt.wte
-    return (
-        gpt,
-        LearnedPositionEmbeddings(max_mel_seq_len, model_dim),
-        LearnedPositionEmbeddings(max_text_seq_len, model_dim),
-        None,
-        None,
-    )
 
 
 class UnifiedVoice(nn.Module):
@@ -253,20 +308,30 @@ class UnifiedVoice(nn.Module):
             self.number_text_tokens * types + 1, model_dim
         )
         self.mel_embedding = nn.Embedding(self.number_mel_codes, model_dim)
-        (
-            self.gpt,
-            self.mel_pos_embedding,
-            self.text_pos_embedding,
-            self.mel_layer_pos_embedding,
-            self.text_layer_pos_embedding,
-        ) = build_hf_gpt_transformer(
-            layers,
-            model_dim,
-            heads,
-            self.max_mel_tokens + 2 + self.max_conditioning_inputs,
-            self.max_text_tokens + 2,
-            checkpointing,
+
+        max_mel_seq_len = self.max_mel_tokens + 2 + self.max_conditioning_inputs
+        max_text_seq_len = self.max_text_tokens + 2
+        gpt_config = GPT2Config(
+            vocab_size=256,  # Unused.
+            n_positions=max_mel_seq_len + max_text_seq_len,
+            n_embd=model_dim,
+            n_layer=layers,
+            n_head=heads,
+            use_cache=not checkpointing,
         )
+        gpt = GPT2Model(gpt_config)
+        # Override the built in positional embeddings
+        del (
+            gpt.wpe
+        )  # TODO: figure out relevance in fixing exported model definition: Embedding(1012, 1024)
+        gpt.wpe = functools.partial(null_position_embeddings, dim=model_dim)
+        # Built-in token embeddings are unused.
+        del gpt.wte
+        self.gpt = gpt
+        self.mel_pos_embedding = LearnedPositionEmbeddings(max_mel_seq_len, model_dim)
+        self.text_pos_embedding = LearnedPositionEmbeddings(max_text_seq_len, model_dim)
+        self.mel_layer_pos_embedding = None
+        self.text_layer_pos_embedding = None
         self.mel_solo_embedding = 0
         self.text_solo_embedding = 0
 
@@ -440,7 +505,7 @@ class UnifiedVoice(nn.Module):
         max_generate_length=None,
         typical_sampling=False,
         typical_mass=0.9,
-        **hf_generate_kwargs
+        **hf_generate_kwargs,
     ):
         text_inputs = F.pad(text_inputs, (0, 1), value=self.stop_text_token)
         text_inputs, text_targets = self.build_aligned_inputs_and_targets(
@@ -481,7 +546,7 @@ class UnifiedVoice(nn.Module):
             max_length=max_length,
             logits_processor=logits_processor,
             num_return_sequences=num_return_sequences,
-            **hf_generate_kwargs
+            **hf_generate_kwargs,
         )
         return gen[:, trunc_index:]
 
