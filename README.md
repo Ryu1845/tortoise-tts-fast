@@ -1,4 +1,4 @@
-# this repo is now maintenance only; please develop a fork || use the mrq repo if you have large features to submit
+# this repo is very rough right now, do not try to use yet
 
 ### recent updates
 
