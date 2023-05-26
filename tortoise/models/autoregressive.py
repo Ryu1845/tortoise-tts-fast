@@ -4,7 +4,7 @@ import functools
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from .transformers import GPT2Config, GPT2PreTrainedModel, LogitsProcessorList
+from .transformers import GPT2Config, GPT2PreTrainedModel, LogitsProcessorList, GPT2Model
 from .transformers import CausalLMOutputWithCrossAttentions
 
 
@@ -167,16 +167,13 @@ def build_hf_gpt_transformer(
     """
     GPT-2 implemented by the HuggingFace library.
     """
-    from transformers import GPT2Config, GPT2Model
 
     gpt_config = GPT2Config(
         vocab_size=256,  # Unused.
         n_positions=max_mel_seq_len + max_text_seq_len,
-        n_ctx=max_mel_seq_len + max_text_seq_len,
         n_embd=model_dim,
         n_layer=layers,
         n_head=heads,
-        gradient_checkpointing=checkpointing,
         use_cache=not checkpointing,
     )
     gpt = GPT2Model(gpt_config)
@@ -289,11 +286,9 @@ class UnifiedVoice(nn.Module):
         gpt_config = GPT2Config(
             vocab_size=self.max_mel_tokens,
             n_positions=seq_length,
-            n_ctx=seq_length,
             n_embd=self.model_dim,
             n_layer=self.layers,
             n_head=self.heads,
-            gradient_checkpointing=False,
             use_cache=True,
         )
         self.inference_model = GPT2InferenceModel(

@@ -157,7 +157,6 @@ class GPT2Config:
         eos_token_id=50256,
         scale_attn_by_inverse_layer_idx=False,
         reorder_and_upcast_attn=False,
-        **kwargs,
     ):
         self.vocab_size = vocab_size
         self.n_positions = n_positions
@@ -183,3 +182,10 @@ class GPT2Config:
 
         self.bos_token_id = bos_token_id
         self.eos_token_id = eos_token_id
+        self.hidden_size = n_embd
+        self.max_position_embeddings = n_positions
+        self.num_hidden_layers = n_layer
+        self.num_attention_heads = n_head
+        self.add_cross_attention = False
+        self.output_attentions = False
+        self.output_hidden_states = False
