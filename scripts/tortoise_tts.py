@@ -246,7 +246,7 @@ if __name__ == "__main__":
         split_text,
         validate_output_dir,
         voice_loader,
-        save_gen_with_voicefix
+        save_gen_with_voicefix,
     )
 
     # get voices
@@ -279,7 +279,6 @@ if __name__ == "__main__":
         print("Loading tts...")
     tts = TextToSpeech(
         models_dir=args.advanced.models_dir,
-        enable_redaction=not args.advanced.disable_redaction,
         device=args.advanced.device,
         autoregressive_batch_size=args.advanced.batch_size,
         high_vram=not args.speed.low_vram,
@@ -362,7 +361,12 @@ if __name__ == "__main__":
                     audio_parts.append(audio)
                 if args.output.output_dir:
                     filename = f"{clip_name}_{candidate_idx:02d}.wav"
-                    save_gen_with_voicefix(audio, os.path.join(args.output.output_dir, filename), squeeze=False, voicefixer=args.general.voicefixer)
+                    save_gen_with_voicefix(
+                        audio,
+                        os.path.join(args.output.output_dir, filename),
+                        squeeze=False,
+                        voicefixer=args.general.voicefixer,
+                    )
 
         audio = torch.cat(audio_parts, dim=-1)
         if args.output.output_dir:
@@ -375,7 +379,9 @@ if __name__ == "__main__":
             )
         elif args.output.output:
             filename = args.output.output or os.tmp
-            save_gen_with_voicefix(audio, filename, squeeze=False, voicefixer=args.general.voicefixer)
+            save_gen_with_voicefix(
+                audio, filename, squeeze=False, voicefixer=args.general.voicefixer
+            )
         elif args.output.play:
             print("WARNING: cannot use voicefixer with --play")
             f = tempfile.NamedTemporaryFile(suffix=".wav", delete=True)

@@ -146,7 +146,7 @@ def main():
                 help="Force conditioning free diffusion",
                 value=True,
             )
-            no_cond_free = st.checkbox(
+            st.checkbox(
                 "Force Not Conditioning Free",
                 help="Force disable conditioning free diffusion",
                 value=False,

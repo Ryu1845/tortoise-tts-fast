@@ -4,7 +4,6 @@ import torch.nn.functional as F
 from torch import einsum
 
 from tortoise.models.arch_util import CheckpointedXTransformerEncoder
-from tortoise.models.transformer import Transformer
 from tortoise.models.xtransformers import Encoder
 
 
@@ -84,22 +83,6 @@ class CLVP(nn.Module):
                     rotary_pos_emb=True,
                 ),
             )
-        else:
-            self.text_transformer = Transformer(
-                causal=False,
-                seq_len=text_seq_len,
-                dim=dim_text,
-                depth=text_enc_depth,
-                heads=text_heads,
-            )
-            self.speech_transformer = Transformer(
-                causal=False,
-                seq_len=speech_seq_len,
-                dim=dim_speech,
-                depth=speech_enc_depth,
-                heads=speech_heads,
-            )
-
         self.temperature = nn.Parameter(torch.tensor(1.0))
         self.text_mask_percentage = text_mask_percentage
         self.voice_mask_percentage = voice_mask_percentage

@@ -1,5 +1,7 @@
 import os
-try: import gdown
+
+try:
+    import gdown
 except ImportError:
     raise ImportError(
         "Sorry, gdown is required in order to download the new BigVGAN vocoder.\n"
@@ -31,6 +33,8 @@ MODELS = {
 
 
 pbar = None
+
+
 def download_models(specific_models=None):
     """
     Call to download all the models that Tortoise uses.
@@ -74,4 +78,3 @@ def get_model_path(model_name, models_dir=MODELS_DIR):
     if not os.path.exists(model_path) and models_dir == MODELS_DIR:
         download_models([model_name])
     return model_path
-

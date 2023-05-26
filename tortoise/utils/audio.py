@@ -8,8 +8,6 @@ import torch
 import torchaudio
 from scipy.io.wavfile import read
 
-from tortoise.utils.stft import STFT
-
 BUILTIN_VOICES_DIR = os.path.join(
     os.path.dirname(os.path.realpath(__file__)), "../voices"
 )
@@ -171,68 +169,3 @@ def load_voices(voices: List[str], extra_voice_dirs: List[str] = []):
         latents_1 = torch.stack([l[1] for l in latents], dim=0).mean(dim=0)
         latents = (latents_0, latents_1)
         return None, latents
-
-
-class TacotronSTFT(torch.nn.Module):
-    def __init__(
-        self,
-        filter_length=1024,
-        hop_length=256,
-        win_length=1024,
-        n_mel_channels=80,
-        sampling_rate=22050,
-        mel_fmin=0.0,
-        mel_fmax=8000.0,
-    ):
-        super(TacotronSTFT, self).__init__()
-        self.n_mel_channels = n_mel_channels
-        self.sampling_rate = sampling_rate
-        self.stft_fn = STFT(filter_length, hop_length, win_length)
-        from librosa.filters import mel as librosa_mel_fn
-
-        mel_basis = librosa_mel_fn(
-            sr=sampling_rate,
-            n_fft=filter_length,
-            n_mels=n_mel_channels,
-            fmin=mel_fmin,
-            fmax=mel_fmax,
-        )
-        mel_basis = torch.from_numpy(mel_basis).float()
-        self.register_buffer("mel_basis", mel_basis)
-
-    def spectral_normalize(self, magnitudes):
-        output = dynamic_range_compression(magnitudes)
-        return output
-
-    def spectral_de_normalize(self, magnitudes):
-        output = dynamic_range_decompression(magnitudes)
-        return output
-
-    def mel_spectrogram(self, y):
-        """Computes mel-spectrograms from a batch of waves
-        PARAMS
-        ------
-        y: Variable(torch.FloatTensor) with shape (B, T) in range [-1, 1]
-
-        RETURNS
-        -------
-        mel_output: torch.FloatTensor of shape (B, n_mel_channels, T)
-        """
-        assert torch.min(y.data) >= -10
-        assert torch.max(y.data) <= 10
-        y = torch.clip(y, min=-1, max=1)
-
-        magnitudes, phases = self.stft_fn.transform(y)
-        magnitudes = magnitudes.data
-        mel_output = torch.matmul(self.mel_basis, magnitudes)
-        mel_output = self.spectral_normalize(mel_output)
-        return mel_output
-
-
-def wav_to_univnet_mel(wav, do_normalization=False, device="cuda"):
-    stft = TacotronSTFT(1024, 256, 1024, 100, 24000, 0, 12000)
-    stft = stft.to(device)
-    mel = stft.mel_spectrogram(wav)
-    if do_normalization:
-        mel = normalize_tacotron_mel(mel)
-    return mel
