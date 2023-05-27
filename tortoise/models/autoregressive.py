@@ -522,25 +522,3 @@ class UnifiedVoice(nn.Module):
             **hf_generate_kwargs,
         )
         return gen[:, trunc_index:]
-
-
-if __name__ == "__main__":
-    gpt = UnifiedVoice(
-        model_dim=256,
-        heads=4,
-        train_solo_embeddings=True,
-        use_mel_codes_as_input=True,
-        max_conditioning_inputs=4,
-    )
-    l = gpt(
-        torch.randn(2, 3, 80, 800),
-        torch.randint(high=120, size=(2, 120)),
-        torch.tensor([32, 120]),
-        torch.randint(high=8192, size=(2, 250)),
-        torch.tensor([250 * 256, 195 * 256]),
-    )
-    gpt.text_forward(
-        torch.randn(2, 80, 800),
-        torch.randint(high=50, size=(2, 80)),
-        torch.tensor([32, 80]),
-    )

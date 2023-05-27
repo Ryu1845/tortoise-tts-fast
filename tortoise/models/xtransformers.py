@@ -334,18 +334,12 @@ class Attention(nn.Module):
             n,
             _,
             h,
-            talking_heads,
-            collab_heads,
-            head_scale,
             scale,
             device,
             has_context,
         ) = (
             *x.shape,
             self.heads,
-            self.talking_heads,
-            self.collab_heads,
-            self.head_scale,
             self.scale,
             x.device,
             exists(context),
@@ -678,7 +672,7 @@ class ContinuousTransformerWrapper(nn.Module):
         use_cache=False,
         **kwargs,
     ):
-        b, n, _, device = *x.shape, x.device
+        b, n, _ = x.shape
 
         x = self.project_in(x)
         x = x + self.pos_emb(x)

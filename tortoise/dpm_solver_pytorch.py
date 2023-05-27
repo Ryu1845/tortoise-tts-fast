@@ -148,13 +148,7 @@ class NoiseScheduleVP:
         """
         Compute log(alpha_t) of a given continuous-time label t in [0, T].
         """
-        if self.schedule == "discrete":
-            return interpolate_fn(
-                t.reshape((-1, 1)),
-                self.t_array.to(t.device),
-                self.log_alpha_array.to(t.device),
-            ).reshape((-1))
-        elif self.schedule == "linear":
+        if self.schedule == "linear":
             return -0.25 * t**2 * (self.beta_1 - self.beta_0) - 0.5 * t * self.beta_0
         elif self.schedule == "cosine":
 
@@ -415,29 +409,10 @@ class DPM_Solver:
         self.noise_schedule = noise_schedule
         assert algorithm_type in ["dpmsolver", "dpmsolver++"]
         self.algorithm_type = algorithm_type
-        if correcting_x0_fn == "dynamic_thresholding":
-            self.correcting_x0_fn = self.dynamic_thresholding_fn
-        else:
-            self.correcting_x0_fn = correcting_x0_fn
+        self.correcting_x0_fn = correcting_x0_fn
         self.correcting_xt_fn = correcting_xt_fn
         self.dynamic_thresholding_ratio = dynamic_thresholding_ratio
         self.thresholding_max_val = thresholding_max_val
-
-    def dynamic_thresholding_fn(self, x0, t):
-        """
-        The dynamic thresholding method.
-        """
-        dims = x0.dim()
-        p = self.dynamic_thresholding_ratio
-        s = torch.quantile(torch.abs(x0).reshape((x0.shape[0], -1)), p, dim=1)
-        s = expand_dims(
-            torch.maximum(
-                s, self.thresholding_max_val * torch.ones_like(s).to(s.device)
-            ),
-            dims,
-        )
-        x0 = torch.clamp(x0, -s, s) / s
-        return x0
 
     def noise_prediction_fn(self, x, t):
         """

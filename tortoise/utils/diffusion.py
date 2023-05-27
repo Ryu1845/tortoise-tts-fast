@@ -9,7 +9,6 @@ Docstrings have been added, as well as DDIM sampling and a new collection of bet
 # AGPL: a notification must be added stating that changes have been made to that file.
 
 import enum
-import math
 
 import numpy as np
 import torch
@@ -328,11 +327,6 @@ def get_named_beta_schedule(schedule_name, num_diffusion_timesteps):
         beta_end = scale * 0.02
         return np.linspace(
             beta_start, beta_end, num_diffusion_timesteps, dtype=np.float64
-        )
-    elif schedule_name == "cosine":
-        return betas_for_alpha_bar(
-            num_diffusion_timesteps,
-            lambda t: math.cos((t + 0.008) / 1.008 * math.pi / 2) ** 2,
         )
     else:
         raise NotImplementedError(f"unknown beta schedule: {schedule_name}")

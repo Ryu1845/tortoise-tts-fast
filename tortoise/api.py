@@ -7,21 +7,37 @@ from time import time
 
 import torch
 import torch.nn.functional as F
+import torchaudio
 from tqdm import tqdm
 
+from tortoise.models.arch_util import TorchMelSpectrogram
 from tortoise.models.autoregressive import UnifiedVoice
 from tortoise.models.clvp import CLVP
 from tortoise.models.diffusion_decoder import DiffusionTts
 from tortoise.models.random_latent_generator import RandomLatentConverter
 from tortoise.models.utils import MODELS_DIR, get_model_path
 from tortoise.models.vocoder import VocConf
-from tortoise.utils.audio import denormalize_tacotron_mel
+from tortoise.utils.audio import denormalize_tacotron_mel, wav_to_univnet_mel
 from tortoise.utils.diffusion import (
     SpacedDiffusion,
     get_named_beta_schedule,
     space_timesteps,
 )
 from tortoise.utils.tokenizer import VoiceBpeTokenizer
+
+
+def format_conditioning(clip, cond_length=132300, device="cuda"):
+    """
+    Converts the given conditioning signal to a MEL spectrogram and clips it as expected by the models.
+    """
+    gap = clip.shape[-1] - cond_length
+    if gap < 0:
+        clip = F.pad(clip, pad=(0, abs(gap)))
+    elif gap > 0:
+        rand_start = random.randint(0, gap)
+        clip = clip[:, rand_start : rand_start + cond_length]
+    mel_clip = TorchMelSpectrogram()(clip.unsqueeze(0)).squeeze(0)
+    return mel_clip.unsqueeze(0).to(device)
 
 
 def pad_or_truncate(t, length):
@@ -97,7 +113,7 @@ def do_spectrogram_diffusion(
     diffuser,
     latents,
     conditioning_latents,
-    temperature=1,
+    temperature=1.0,
     verbose=True,
 ):
     """
@@ -363,6 +379,90 @@ class TextToSpeech:
         settings.update(kwargs)  # allow overriding of preset settings with kwargs
         return self.tts(text, **settings)
 
+    def get_conditioning_latents(
+        self,
+        voice_samples,
+        return_mels=False,
+        latent_averaging_mode=0,
+        original_tortoise=False,
+    ):
+        """
+        Transforms one or more voice_samples into a tuple (autoregressive_conditioning_latent, diffusion_conditioning_latent).
+        These are expressive learned latents that encode aspects of the provided clips like voice, intonation, and acoustic
+        properties.
+        :param voice_samples: List of arbitrary reference clips, which should be *pairs* of torch tensors containing arbitrary kHz waveform data.
+        :param latent_averaging_mode: 0/1/2 for following modes:
+            0 - latents will be generated as in original tortoise, using ~4.27s from each voice sample, averaging latent across all samples
+            1 - latents will be generated using (almost) entire voice samples, averaged across all the ~4.27s chunks
+            2 - latents will be generated using (almost) entire voice samples, averaged per voice sample
+        """
+        assert latent_averaging_mode in [
+            0,
+            1,
+            2,
+        ], "latent_averaging mode has to be one of (0, 1, 2)"
+        print("mode", latent_averaging_mode)
+        with torch.no_grad():
+            voice_samples = [[v.to(self.device) for v in ls] for ls in voice_samples]
+
+            auto_conds = []
+            for ls in voice_samples:
+                auto_conds.append(format_conditioning(ls[0], device=self.device))
+            auto_conds = torch.stack(auto_conds, dim=1)
+            with self.temporary_cuda(self.autoregressive) as ar:
+                auto_latent = ar.get_conditioning(auto_conds)
+
+            diffusion_conds = []
+
+            DURS_CONST = 102400
+            for ls in voice_samples:
+                # The diffuser operates at a sample rate of 24000 (except for the latent inputs)
+                sample = (
+                    torchaudio.functional.resample(ls[0], 22050, 24000)
+                    if original_tortoise
+                    else ls[1]
+                )
+                if latent_averaging_mode == 0:
+                    sample = pad_or_truncate(sample, DURS_CONST)
+                    cond_mel = wav_to_univnet_mel(
+                        sample.to(self.device),
+                        do_normalization=False,
+                        device=self.device,
+                    )
+                    diffusion_conds.append(cond_mel)
+                else:
+                    from math import ceil
+
+                    if latent_averaging_mode == 2:
+                        temp_diffusion_conds = []
+                    for chunk in range(ceil(sample.shape[1] / DURS_CONST)):
+                        current_sample = sample[
+                            :, chunk * DURS_CONST : (chunk + 1) * DURS_CONST
+                        ]
+                        current_sample = pad_or_truncate(current_sample, DURS_CONST)
+                        cond_mel = wav_to_univnet_mel(
+                            current_sample.to(self.device),
+                            do_normalization=False,
+                            device=self.device,
+                        )
+                        if latent_averaging_mode == 1:
+                            diffusion_conds.append(cond_mel)
+                        elif latent_averaging_mode == 2:
+                            temp_diffusion_conds.append(cond_mel)
+                    if latent_averaging_mode == 2:
+                        diffusion_conds.append(
+                            torch.stack(temp_diffusion_conds).mean(0)
+                        )
+            diffusion_conds = torch.stack(diffusion_conds, dim=1)
+
+            with self.temporary_cuda(self.diffusion) as diffusion:
+                diffusion_latent = diffusion.get_conditioning(diffusion_conds)
+
+        if return_mels:
+            return auto_latent, diffusion_latent, auto_conds, diffusion_conds
+        else:
+            return auto_latent, diffusion_latent
+
     def tts(
         self,
         text,
@@ -522,10 +622,6 @@ class TextToSpeech:
             with self.temporary_cuda(self.clvp) as clvp, torch.autocast(
                 device_type="cuda", dtype=torch.float16, enabled=half
             ):
-                if cvvp_amount > 0:
-                    if self.cvvp is None:
-                        self.load_cvvp()
-                    self.cvvp = self.cvvp.to(self.device)
                 if verbose:
                     if self.cvvp is None:
                         print("Computing best candidates using CLVP")

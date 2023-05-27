@@ -3,7 +3,6 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Callable, Optional
 
-import torch
 import torch.nn as nn
 
 try:
@@ -52,18 +51,3 @@ class VocConf(Enum):
         "bigvgan_24khz_100band_g.pth",
         "generator",
     )
-
-
-if __name__ == "__main__":
-    model = UnivNetGenerator()
-
-    c = torch.randn(3, 100, 10)
-    z = torch.randn(3, 64, 10)
-    print(c.shape)
-
-    y = model(c, z)
-    print(y.shape)
-    assert y.shape == torch.Size([3, 1, 2560])
-
-    pytorch_total_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
-    print(pytorch_total_params)

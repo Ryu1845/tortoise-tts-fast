@@ -1,7 +1,11 @@
 import os
 import sys
+from pathlib import Path
 from random import randint
-from typing import List, Optional, Set, Union
+from typing import Any, Callable, List, Optional, Set, Union
+
+import torch
+import torchaudio
 
 from tortoise.utils.audio import get_voices, load_audio, load_voices
 from tortoise.utils.text import split_and_recombine_text
@@ -76,13 +80,6 @@ def check_pydub(play: bool):
 
 def get_seed(seed: Optional[int]):
     return randint(0, 2**32 - 1) if seed is None else seed
-
-
-from pathlib import Path
-from typing import Any, Callable
-
-import torch
-import torchaudio
 
 
 def run_and_save_tts(
