@@ -13,98 +13,176 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-"""PyTorch OpenAI GPT-2 model."""
+""" OpenAI GPT-2 configuration"""
 
 import math
-from dataclasses import dataclass
 from typing import Optional, Tuple, Union
 
 import torch
 import torch.utils.checkpoint
 from torch import nn
 
-from .configuration_gpt2 import GPT2Config
-from . import ModelOutput
 
-# from ...activations import ACT2FN
-# from ...modeling_outputs import (
-#     BaseModelOutputWithPastAndCrossAttentions,
-#     CausalLMOutputWithCrossAttentions,
-#     QuestionAnsweringModelOutput,
-#     SequenceClassifierOutputWithPast,
-#     TokenClassifierOutput,
-# )
-# from ...modeling_utils import PreTrainedModel, SequenceSummary
-# from ...pytorch_utils import Conv1D, find_pruneable_heads_and_indices, prune_conv1d_layer
-# from ...utils import (
-#     ModelOutput,
-#     add_code_sample_docstrings,
-#     add_start_docstrings,
-#     add_start_docstrings_to_model_forward,
-#     logging,
-#     replace_return_docstrings,
-# )
-# from ...utils.model_parallel_utils import assert_device_map, get_device_map
-# from .configuration_gpt2 import GPT2Config
-
-
-_CHECKPOINT_FOR_DOC = "gpt2"
-_CONFIG_FOR_DOC = "GPT2Config"
-
-GPT2_PRETRAINED_MODEL_ARCHIVE_LIST = [
-    "gpt2",
-    "gpt2-medium",
-    "gpt2-large",
-    "gpt2-xl",
-    "distilgpt2",
-    # See all GPT-2 models at https://huggingface.co/models?filter=gpt2
-]
-
-
-@dataclass
-class BaseModelOutputWithPastAndCrossAttentions(ModelOutput):
+class GPT2Config:
     """
-    Base class for model's outputs that may also contain a past key/values (to speed up sequential decoding).
+    This is the configuration class to store the configuration of a [`GPT2Model`] or a [`TFGPT2Model`]. It is used to
+    instantiate a GPT-2 model according to the specified arguments, defining the model architecture. Instantiating a
+    configuration with the defaults will yield a similar configuration to that of the GPT-2
+    [gpt2](https://huggingface.co/gpt2) architecture.
+
+    Configuration objects inherit from [`PretrainedConfig`] and can be used to control the model outputs. Read the
+    documentation from [`PretrainedConfig`] for more information.
+
 
     Args:
-        last_hidden_state (`torch.FloatTensor` of shape `(batch_size, sequence_length, hidden_size)`):
-            Sequence of hidden-states at the output of the last layer of the model.
+        vocab_size (`int`, *optional*, defaults to 50257):
+            Vocabulary size of the GPT-2 model. Defines the number of different tokens that can be represented by the
+            `inputs_ids` passed when calling [`GPT2Model`] or [`TFGPT2Model`].
+        n_positions (`int`, *optional*, defaults to 1024):
+            The maximum sequence length that this model might ever be used with. Typically set this to something large
+            just in case (e.g., 512 or 1024 or 2048).
+        n_embd (`int`, *optional*, defaults to 768):
+            Dimensionality of the embeddings and hidden states.
+        n_layer (`int`, *optional*, defaults to 12):
+            Number of hidden layers in the Transformer encoder.
+        n_head (`int`, *optional*, defaults to 12):
+            Number of attention heads for each attention layer in the Transformer encoder.
+        n_inner (`int`, *optional*, defaults to None):
+            Dimensionality of the inner feed-forward layers. `None` will set it to 4 times n_embd
+        activation_function (`str`, *optional*, defaults to `"gelu"`):
+            Activation function, to be selected in the list `["relu", "silu", "gelu", "tanh", "gelu_new"]`.
+        resid_pdrop (`float`, *optional*, defaults to 0.1):
+            The dropout probability for all fully connected layers in the embeddings, encoder, and pooler.
+        embd_pdrop (`float`, *optional*, defaults to 0.1):
+            The dropout ratio for the embeddings.
+        attn_pdrop (`float`, *optional*, defaults to 0.1):
+            The dropout ratio for the attention.
+        layer_norm_epsilon (`float`, *optional*, defaults to 1e-5):
+            The epsilon to use in the layer normalization layers.
+        initializer_range (`float`, *optional*, defaults to 0.02):
+            The standard deviation of the truncated_normal_initializer for initializing all weight matrices.
+        summary_type (`string`, *optional*, defaults to `"cls_index"`):
+            Argument used when doing sequence summary, used in the models [`GPT2DoubleHeadsModel`] and
+            [`TFGPT2DoubleHeadsModel`].
 
-            If `past_key_values` is used only the last hidden-state of the sequences of shape `(batch_size, 1,
-            hidden_size)` is output.
-        past_key_values (`tuple(tuple(torch.FloatTensor))`, *optional*, returned when `use_cache=True` is passed or when `config.use_cache=True`):
-            Tuple of `tuple(torch.FloatTensor)` of length `config.n_layers`, with each tuple having 2 tensors of shape
-            `(batch_size, num_heads, sequence_length, embed_size_per_head)`) and optionally if
-            `config.is_encoder_decoder=True` 2 additional tensors of shape `(batch_size, num_heads,
-            encoder_sequence_length, embed_size_per_head)`.
+            Has to be one of the following options:
 
-            Contains pre-computed hidden-states (key and values in the self-attention blocks and optionally if
-            `config.is_encoder_decoder=True` in the cross-attention blocks) that can be used (see `past_key_values`
-            input) to speed up sequential decoding.
-        hidden_states (`tuple(torch.FloatTensor)`, *optional*, returned when `output_hidden_states=True` is passed or when `config.output_hidden_states=True`):
-            Tuple of `torch.FloatTensor` (one for the output of the embeddings, if the model has an embedding layer, +
-            one for the output of each layer) of shape `(batch_size, sequence_length, hidden_size)`.
+                - `"last"`: Take the last token hidden state (like XLNet).
+                - `"first"`: Take the first token hidden state (like BERT).
+                - `"mean"`: Take the mean of all tokens hidden states.
+                - `"cls_index"`: Supply a Tensor of classification token position (like GPT/GPT-2).
+                - `"attn"`: Not implemented now, use multi-head attention.
+        summary_use_proj (`bool`, *optional*, defaults to `True`):
+            Argument used when doing sequence summary, used in the models [`GPT2DoubleHeadsModel`] and
+            [`TFGPT2DoubleHeadsModel`].
 
-            Hidden-states of the model at the output of each layer plus the optional initial embedding outputs.
-        attentions (`tuple(torch.FloatTensor)`, *optional*, returned when `output_attentions=True` is passed or when `config.output_attentions=True`):
-            Tuple of `torch.FloatTensor` (one for each layer) of shape `(batch_size, num_heads, sequence_length,
-            sequence_length)`.
+            Whether or not to add a projection after the vector extraction.
+        summary_activation (`str`, *optional*):
+            Argument used when doing sequence summary. Used in for the multiple choice head in
+            [`GPT2DoubleHeadsModel`].
 
-            Attentions weights after the attention softmax, used to compute the weighted average in the self-attention
-            heads.
-        cross_attentions (`tuple(torch.FloatTensor)`, *optional*, returned when `output_attentions=True` and `config.add_cross_attention=True` is passed or when `config.output_attentions=True`):
-            Tuple of `torch.FloatTensor` (one for each layer) of shape `(batch_size, num_heads, sequence_length,
-            sequence_length)`.
+            Pass `"tanh"` for a tanh activation to the output, any other value will result in no activation.
+        summary_proj_to_labels (`bool`, *optional*, defaults to `True`):
+            Argument used when doing sequence summary, used in the models [`GPT2DoubleHeadsModel`] and
+            [`TFGPT2DoubleHeadsModel`].
 
-            Attentions weights of the decoder's cross-attention layer, after the attention softmax, used to compute the
-            weighted average in the cross-attention heads.
-    """
+            Whether the projection outputs should have `config.num_labels` or `config.hidden_size` classes.
+        summary_first_dropout (`float`, *optional*, defaults to 0.1):
+            Argument used when doing sequence summary, used in the models [`GPT2DoubleHeadsModel`] and
+            [`TFGPT2DoubleHeadsModel`].
 
-    last_hidden_state: torch.FloatTensor = None
-    past_key_values: Optional[Tuple[Tuple[torch.FloatTensor]]] = None
-    hidden_states: Optional[Tuple[torch.FloatTensor]] = None
-    attentions: Optional[Tuple[torch.FloatTensor]] = None
-    cross_attentions: Optional[Tuple[torch.FloatTensor]] = None
+            The dropout ratio to be used after the projection and activation.
+        scale_attn_weights (`bool`, *optional*, defaults to `True`):
+            Scale attention weights by dividing by sqrt(hidden_size)..
+        use_cache (`bool`, *optional*, defaults to `True`):
+            Whether or not the model should return the last key/values attentions (not used by all models).
+        scale_attn_by_inverse_layer_idx (`bool`, *optional*, defaults to `False`):
+            Whether to additionally scale attention weights by `1 / layer_idx + 1`.
+        reorder_and_upcast_attn (`bool`, *optional*, defaults to `False`):
+            Whether to scale keys (K) prior to computing attention (dot-product) and upcast attention
+            dot-product/softmax to float() when training with mixed precision.
+
+    Example:
+
+    ```python
+    >>> from transformers import GPT2Config, GPT2Model
+
+    >>> # Initializing a GPT2 configuration
+    >>> configuration = GPT2Config()
+
+    >>> # Initializing a model (with random weights) from the configuration
+    >>> model = GPT2Model(configuration)
+
+    >>> # Accessing the model configuration
+    >>> configuration = model.config
+    ```"""
+
+    model_type = "gpt2"
+    keys_to_ignore_at_inference = ["past_key_values"]
+    attribute_map = {
+        "hidden_size": "n_embd",
+        "max_position_embeddings": "n_positions",
+        "num_attention_heads": "n_head",
+        "num_hidden_layers": "n_layer",
+    }
+
+    def __init__(
+        self,
+        vocab_size=50257,
+        n_positions=1024,
+        n_embd=768,
+        n_layer=12,
+        n_head=12,
+        n_inner=None,
+        activation_function="gelu_new",
+        resid_pdrop=0.1,
+        embd_pdrop=0.1,
+        attn_pdrop=0.1,
+        layer_norm_epsilon=1e-5,
+        initializer_range=0.02,
+        summary_type="cls_index",
+        summary_use_proj=True,
+        summary_activation=None,
+        summary_proj_to_labels=True,
+        summary_first_dropout=0.1,
+        scale_attn_weights=True,
+        use_cache=True,
+        bos_token_id=50256,
+        eos_token_id=50256,
+        scale_attn_by_inverse_layer_idx=False,
+        reorder_and_upcast_attn=False,
+    ):
+        self.vocab_size = vocab_size
+        self.n_positions = n_positions
+        self.n_embd = n_embd
+        self.n_layer = n_layer
+        self.n_head = n_head
+        self.n_inner = n_inner
+        self.activation_function = activation_function
+        self.resid_pdrop = resid_pdrop
+        self.embd_pdrop = embd_pdrop
+        self.attn_pdrop = attn_pdrop
+        self.layer_norm_epsilon = layer_norm_epsilon
+        self.initializer_range = initializer_range
+        self.summary_type = summary_type
+        self.summary_use_proj = summary_use_proj
+        self.summary_activation = summary_activation
+        self.summary_first_dropout = summary_first_dropout
+        self.summary_proj_to_labels = summary_proj_to_labels
+        self.scale_attn_weights = scale_attn_weights
+        self.use_cache = use_cache
+        self.scale_attn_by_inverse_layer_idx = scale_attn_by_inverse_layer_idx
+        self.reorder_and_upcast_attn = reorder_and_upcast_attn
+
+        self.bos_token_id = bos_token_id
+        self.eos_token_id = eos_token_id
+        self.hidden_size = n_embd
+        self.max_position_embeddings = n_positions
+        self.num_hidden_layers = n_layer
+        self.num_attention_heads = n_head
+        self.add_cross_attention = False
+        self.output_attentions = False
+        self.output_hidden_states = False
 
 
 class Conv1D(nn.Module):
@@ -349,115 +427,12 @@ class GPT2Block(nn.Module):
         return outputs  # hidden_states, present, (attentions, cross_attentions)
 
 
-class GPT2PreTrainedModel(nn.Module):
-    """
-    An abstract class to handle weights initialization and a simple interface for downloading and loading pretrained
-    models.
-    """
-
-    config_class = GPT2Config
-    base_model_prefix = "transformer"
-    is_parallelizable = True
-    supports_gradient_checkpointing = True
-    _no_split_modules = ["GPT2Block"]
-
-    def __init__(self, config: GPT2Config, *inputs, **kwargs):
-        self.config = config
-        super().__init__()
-
-    def generate(
-        self,
-        input_ids,
-        repetition_penalty=2.0,
-        temperature=0.2,
-        top_p=0.8,
-        eos_token_id=None,
-        pad_token_id=None,
-        max_length=250,
-        **kwargs,
-    ):
-        if isinstance(eos_token_id, int):
-            eos_token_id = [eos_token_id]
-        eos_token_id_tensor = (
-            torch.tensor(eos_token_id).to(input_ids.device)
-            if eos_token_id is not None
-            else None
-        )
-        unfinished_sequences = torch.ones(
-            input_ids.shape[0], dtype=torch.long, device=input_ids.device
-        )
-        while True:
-            model_inputs = self.prepare_inputs_for_generation(input_ids)
-            # forward pass to get next token
-            outputs = self(
-                **model_inputs,
-                return_dict=True,
-            )
-            scores = outputs.logits[:, -1, :]
-
-            # top p
-            sorted_logits, sorted_indices = torch.sort(scores, descending=False)
-            cumulative_probs = sorted_logits.softmax(dim=-1).cumsum(dim=-1)
-            # Remove tokens with cumulative top_p above the threshold (token with 0 are kept)
-            sorted_indices_to_remove = cumulative_probs <= (1 - top_p)
-            # scatter sorted tensors to original indexing
-            indices_to_remove = sorted_indices_to_remove.scatter(
-                1, sorted_indices, sorted_indices_to_remove
-            )
-            scores = scores.masked_fill(indices_to_remove, -float("Inf"))
-
-            # temperature
-            scores = scores / temperature
-
-            # repetition penalty
-            score = torch.gather(scores, 1, input_ids)
-            # if score < 0 then repetition penalty has to be multiplied to reduce the previous token probability
-            score = torch.where(
-                score < 0, score * repetition_penalty, score / repetition_penalty
-            )
-            scores.scatter_(1, input_ids, score)
-
-            # sample
-            probs = nn.functional.softmax(scores, dim=-1)
-            next_tokens = torch.multinomial(probs, num_samples=1).squeeze(1)
-
-            # finished sentences should have their next token be a padding token
-            if eos_token_id is not None:
-                if pad_token_id is None:
-                    raise ValueError(
-                        "If `eos_token_id` is defined, make sure that `pad_token_id` is defined."
-                    )
-                next_tokens = next_tokens * unfinished_sequences + pad_token_id * (
-                    1 - unfinished_sequences
-                )
-            # update generated ids, model inputs, and length for next step
-            input_ids = torch.cat([input_ids, next_tokens[:, None]], dim=-1)
-
-            if eos_token_id_tensor is not None:
-                unfinished_sequences = unfinished_sequences.mul(
-                    next_tokens.tile(eos_token_id_tensor.shape[0], 1)
-                    .ne(eos_token_id_tensor.unsqueeze(1))
-                    .prod(dim=0)
-                )
-
-                # stop when each sentence is finished
-                if unfinished_sequences.max() == 0:
-                    break
-            if input_ids.shape[-1] >= max_length:
-                break
-        return input_ids
-
-    def prepare_inputs_for_generation(self, *args, **kwargs):
-        raise NotImplementedError(
-            "A model class needs to define a `prepare_inputs_for_generation` method in order to use `.generate()`."
-        )
-
-
-class GPT2Model(GPT2PreTrainedModel):
+class GPT2Model(nn.Module):
     _keys_to_ignore_on_load_missing = ["attn.masked_bias"]
 
     def __init__(self, config: GPT2Config):
-        super().__init__(config)
+        super().__init__()
+        self.config = config
 
         self.embed_dim = config.hidden_size
 
@@ -490,26 +465,12 @@ class GPT2Model(GPT2PreTrainedModel):
         output_attentions: Optional[bool] = None,
         output_hidden_states: Optional[bool] = None,
         return_dict: Optional[bool] = None,
-    ) -> Union[Tuple, BaseModelOutputWithPastAndCrossAttentions]:
-        output_attentions = (
-            output_attentions
-            if output_attentions is not None
-            else self.config.output_attentions
-        )
-        output_hidden_states = (
-            output_hidden_states
-            if output_hidden_states is not None
-            else self.config.output_hidden_states
-        )
+    ) -> Tuple:
         use_cache = use_cache if use_cache is not None else self.config.use_cache
-        return_dict = (
-            return_dict if return_dict is not None else self.config.use_return_dict
-        )
 
         if inputs_embeds is None:
             raise ValueError("You have to specify either input_ids or inputs_embeds")
         input_shape = inputs_embeds.size()[:-1]
-        inputs_embeds.shape[0]
 
         device = input_ids.device if input_ids is not None else inputs_embeds.device
 
@@ -527,14 +488,6 @@ class GPT2Model(GPT2PreTrainedModel):
             )
             position_ids = position_ids.unsqueeze(0).view(-1, input_shape[-1])
 
-        encoder_attention_mask = None
-
-        # Prepare head mask if needed
-        # 1.0 in head_mask indicate we keep the head
-        # attention_probs has shape bsz x n_heads x N x N
-        # head_mask has shape n_layer x batch x n_heads x N x N
-        head_mask = self.get_head_mask(head_mask, self.config.n_layer)
-
         position_embeds = self.wpe(position_ids)
         hidden_states = inputs_embeds + position_embeds
 
@@ -543,91 +496,27 @@ class GPT2Model(GPT2PreTrainedModel):
         output_shape = input_shape + (hidden_states.size(-1),)
 
         presents = () if use_cache else None
-        all_self_attentions = () if output_attentions else None
-        all_cross_attentions = (
-            () if output_attentions and self.config.add_cross_attention else None
-        )
-        all_hidden_states = () if output_hidden_states else None
         for i, (block, layer_past) in enumerate(zip(self.h, past_key_values)):
             # Model parallel
             outputs = block(
                 hidden_states,
                 layer_past=layer_past,
-                attention_mask=attention_mask,
-                head_mask=head_mask[i],
-                encoder_hidden_states=encoder_hidden_states,
-                encoder_attention_mask=encoder_attention_mask,
                 use_cache=use_cache,
-                output_attentions=output_attentions,
             )
 
             hidden_states = outputs[0]
             if use_cache is True:
                 presents = presents + (outputs[1],)
 
-            if output_attentions:
-                all_self_attentions = all_self_attentions + (
-                    outputs[2 if use_cache else 1],
-                )
-                if self.config.add_cross_attention:
-                    all_cross_attentions = all_cross_attentions + (
-                        outputs[3 if use_cache else 2],
-                    )
-
-            # Model Parallel: If it's the last layer for that device, put things on the next device
-            if self.model_parallel:
-                for k, v in self.device_map.items():
-                    if i == v[-1] and "cuda:" + str(k) != self.last_device:
-                        hidden_states = hidden_states.to("cuda:" + str(k + 1))
-
         hidden_states = self.ln_f(hidden_states)
 
         hidden_states = hidden_states.view(output_shape)
         # Add last hidden state
-        if output_hidden_states:
-            all_hidden_states = all_hidden_states + (hidden_states,)
-
-        if not return_dict:
-            return tuple(
-                v
-                for v in [
-                    hidden_states,
-                    presents,
-                    all_hidden_states,
-                    all_self_attentions,
-                    all_cross_attentions,
-                ]
-                if v is not None
-            )
-
-        return BaseModelOutputWithPastAndCrossAttentions(
-            last_hidden_state=hidden_states,
-            past_key_values=presents,
-            hidden_states=all_hidden_states,
-            attentions=all_self_attentions,
-            cross_attentions=all_cross_attentions,
+        return tuple(
+            v
+            for v in [
+                hidden_states,
+                presents,
+            ]
+            if v is not None
         )
-
-    def get_head_mask(
-        self,
-        head_mask: Optional[torch.Tensor],
-        num_hidden_layers: int,
-        is_attention_chunked: bool = False,
-    ) -> torch.Tensor:
-        """
-        Prepare the head mask if needed.
-
-        Args:
-            head_mask (`torch.Tensor` with shape `[num_heads]` or `[num_hidden_layers x num_heads]`, *optional*):
-                The mask indicating if we should keep the heads or not (1.0 for keep, 0.0 for discard).
-            num_hidden_layers (`int`):
-                The number of hidden layers in the model.
-            is_attention_chunked: (`bool`, *optional*, defaults to `False`):
-                Whether or not the attentions scores are computed by chunks or not.
-
-        Returns:
-            `torch.Tensor` with shape `[num_hidden_layers x batch x num_heads x seq_length x seq_length]` or list with
-            `[None]` for each layer.
-        """
-        head_mask = [None] * num_hidden_layers
-        return head_mask

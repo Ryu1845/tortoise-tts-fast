@@ -5,6 +5,9 @@ from pathlib import Path
 
 import streamlit as st
 
+from app_utils.conf import TortoiseConfig
+from app_utils.filepicker import st_file_selector
+from app_utils.funcs import list_voices, load_model, load_voice_conditionings, timeit
 from tortoise.api import MODELS_DIR
 from tortoise.inference import (
     infer_on_texts,
@@ -12,16 +15,6 @@ from tortoise.inference import (
     split_and_recombine_text,
 )
 from tortoise.utils.diffusion import SAMPLERS
-from app_utils.filepicker import st_file_selector
-from app_utils.conf import TortoiseConfig
-
-from app_utils.funcs import (
-    timeit,
-    load_model,
-    list_voices,
-    load_voice_conditionings,
-)
-
 
 LATENT_MODES = [
     "Tortoise original (bad)",

@@ -13,9 +13,9 @@ import torchaudio
 from simple_parsing import ArgumentParser, field
 
 from tortoise.api import MODELS_DIR, TextToSpeech
+from tortoise.models.vocoder import VocConf
 from tortoise.utils.audio import load_audio
 from tortoise.utils.diffusion import SAMPLERS
-from tortoise.models.vocoder import VocConf
 
 
 @dataclass
@@ -243,10 +243,10 @@ if __name__ == "__main__":
         get_seed,
         parse_multiarg_text,
         parse_voice_str,
+        save_gen_with_voicefix,
         split_text,
         validate_output_dir,
         voice_loader,
-        save_gen_with_voicefix,
     )
 
     # get voices

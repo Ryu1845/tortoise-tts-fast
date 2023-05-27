@@ -1,14 +1,14 @@
+import json
+from dataclasses import dataclass
+from enum import Enum
+from typing import Callable, Optional
+
 import torch
 import torch.nn as nn
 
-import json
-from enum import Enum
-from typing import Optional, Callable
-from dataclasses import dataclass
-
 try:
-    from BigVGAN.models import BigVGAN as BVGModel
     from BigVGAN.env import AttrDict
+    from BigVGAN.models import BigVGAN as BVGModel
 except ImportError:
     raise ImportError(
         "BigVGAN not installed, can't use BigVGAN vocoder\n"

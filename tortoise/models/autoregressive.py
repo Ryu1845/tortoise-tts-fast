@@ -4,12 +4,8 @@ import functools
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from .transformers import (
-    GPT2Config,
-    LogitsProcessorList,
-    GPT2Model,
-)
-from .transformers import CausalLMOutputWithCrossAttentions
+
+from .gpt2 import GPT2Config, GPT2Model
 
 
 def null_position_embeddings(range, dim):
@@ -78,14 +74,10 @@ class GPT2InferenceModel(nn.Module):
         use_cache=None,
         output_attentions=None,
         output_hidden_states=None,
-        return_dict=None,
     ):
         assert self.cached_mel_emb is not None
         assert inputs_embeds is None  # Not supported by this inference model.
         assert labels is None  # Training not supported by this inference model.
-        return_dict = (
-            return_dict if return_dict is not None else self.config.use_return_dict
-        )
 
         # Create embedding
         mel_len = self.cached_mel_emb.shape[1]
@@ -118,22 +110,11 @@ class GPT2InferenceModel(nn.Module):
             use_cache=use_cache,
             output_attentions=output_attentions,
             output_hidden_states=output_hidden_states,
-            return_dict=return_dict,
         )
         hidden_states = transformer_outputs[0]
         lm_logits = self.lm_head(hidden_states)
 
-        if not return_dict:
-            return (lm_logits,) + transformer_outputs[1:]
-
-        return CausalLMOutputWithCrossAttentions(
-            loss=None,
-            logits=lm_logits,
-            past_key_values=transformer_outputs.past_key_values,
-            hidden_states=transformer_outputs.hidden_states,
-            attentions=transformer_outputs.attentions,
-            cross_attentions=transformer_outputs.cross_attentions,
-        )
+        return (lm_logits,) + transformer_outputs[1:]
 
     @staticmethod
     def _reorder_cache(past, beam_idx):
@@ -174,11 +155,8 @@ class GPT2InferenceModel(nn.Module):
         while True:
             model_inputs = self.prepare_inputs_for_generation(input_ids)
             # forward pass to get next token
-            outputs = self(
-                **model_inputs,
-                return_dict=True,
-            )
-            scores = outputs.logits[:, -1, :]
+            logits = self(**model_inputs)[0]
+            scores = logits[:, -1, :]
 
             # top p
             sorted_logits, sorted_indices = torch.sort(scores, descending=False)
@@ -405,11 +383,9 @@ class UnifiedVoice(nn.Module):
             [speech_conditioning_inputs, first_inputs, second_inputs], dim=1
         )
 
-        gpt_out = self.gpt(
-            inputs_embeds=emb, return_dict=True, output_attentions=get_attns
-        )
+        last_hidden_state = self.gpt(inputs_embeds=emb)[0]
 
-        enc = gpt_out.last_hidden_state[
+        enc = last_hidden_state[
             :, 1:
         ]  # The first logit is tied to the speech_conditioning_input
         enc = self.final_norm(enc)
@@ -488,7 +464,6 @@ class UnifiedVoice(nn.Module):
             self.text_head,
             mel_emb,
             self.mel_head,
-            get_attns=return_attentions,
             return_latent=return_latent,
         )
         if return_latent:
@@ -532,7 +507,6 @@ class UnifiedVoice(nn.Module):
         trunc_index = fake_inputs.shape[1]
         inputs = fake_inputs
 
-        logits_processor = LogitsProcessorList()  # TODO disable this
         max_length = (
             trunc_index + self.max_mel_tokens - 1
             if max_generate_length is None
@@ -544,7 +518,6 @@ class UnifiedVoice(nn.Module):
             pad_token_id=self.stop_mel_token,
             eos_token_id=self.stop_mel_token,
             max_length=max_length,
-            logits_processor=logits_processor,
             num_return_sequences=num_return_sequences,
             **hf_generate_kwargs,
         )

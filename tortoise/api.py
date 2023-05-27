@@ -2,6 +2,7 @@
 
 import os
 import random
+from contextlib import contextmanager
 from time import time
 
 import torch
@@ -12,6 +13,7 @@ from tortoise.models.autoregressive import UnifiedVoice
 from tortoise.models.clvp import CLVP
 from tortoise.models.diffusion_decoder import DiffusionTts
 from tortoise.models.random_latent_generator import RandomLatentConverter
+from tortoise.models.utils import MODELS_DIR, get_model_path
 from tortoise.models.vocoder import VocConf
 from tortoise.utils.audio import denormalize_tacotron_mel
 from tortoise.utils.diffusion import (
@@ -20,10 +22,6 @@ from tortoise.utils.diffusion import (
     space_timesteps,
 )
 from tortoise.utils.tokenizer import VoiceBpeTokenizer
-
-from tortoise.models.utils import MODELS_DIR, get_model_path
-
-from contextlib import contextmanager
 
 
 def pad_or_truncate(t, length):
