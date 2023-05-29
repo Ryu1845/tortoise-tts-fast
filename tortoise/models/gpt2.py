@@ -13,7 +13,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-""" OpenAI GPT-2 configuration"""
+""" OpenAI GPT2Model-2 configuration"""
 
 import math
 from typing import Optional, Tuple, Union
@@ -23,11 +23,11 @@ import torch.utils.checkpoint
 from torch import nn
 
 
-class GPT2Config:
+class GPT2Config(dict):
     """
     This is the configuration class to store the configuration of a [`GPT2Model`] or a [`TFGPT2Model`]. It is used to
-    instantiate a GPT-2 model according to the specified arguments, defining the model architecture. Instantiating a
-    configuration with the defaults will yield a similar configuration to that of the GPT-2
+    instantiate a GPT2Model-2 model according to the specified arguments, defining the model architecture. Instantiating a
+    configuration with the defaults will yield a similar configuration to that of the GPT2Model-2
     [gpt2](https://huggingface.co/gpt2) architecture.
 
     Configuration objects inherit from [`PretrainedConfig`] and can be used to control the model outputs. Read the
@@ -36,7 +36,7 @@ class GPT2Config:
 
     Args:
         vocab_size (`int`, *optional*, defaults to 50257):
-            Vocabulary size of the GPT-2 model. Defines the number of different tokens that can be represented by the
+            Vocabulary size of the GPT2Model-2 model. Defines the number of different tokens that can be represented by the
             `inputs_ids` passed when calling [`GPT2Model`] or [`TFGPT2Model`].
         n_positions (`int`, *optional*, defaults to 1024):
             The maximum sequence length that this model might ever be used with. Typically set this to something large
@@ -70,7 +70,7 @@ class GPT2Config:
                 - `"last"`: Take the last token hidden state (like XLNet).
                 - `"first"`: Take the first token hidden state (like BERT).
                 - `"mean"`: Take the mean of all tokens hidden states.
-                - `"cls_index"`: Supply a Tensor of classification token position (like GPT/GPT-2).
+                - `"cls_index"`: Supply a Tensor of classification token position (like GPT2Model/GPT2Model-2).
                 - `"attn"`: Not implemented now, use multi-head attention.
         summary_use_proj (`bool`, *optional*, defaults to `True`):
             Argument used when doing sequence summary, used in the models [`GPT2DoubleHeadsModel`] and
@@ -133,7 +133,6 @@ class GPT2Config:
         n_embd=768,
         n_layer=12,
         n_head=12,
-        n_inner=None,
         activation_function="gelu_new",
         resid_pdrop=0.1,
         embd_pdrop=0.1,
@@ -152,12 +151,13 @@ class GPT2Config:
         scale_attn_by_inverse_layer_idx=False,
         reorder_and_upcast_attn=False,
     ):
+        super().__init__()
         self.vocab_size = vocab_size
         self.n_positions = n_positions
         self.n_embd = n_embd
         self.n_layer = n_layer
         self.n_head = n_head
-        self.n_inner = n_inner
+        self.n_inner = 4*n_embd
         self.activation_function = activation_function
         self.resid_pdrop = resid_pdrop
         self.embd_pdrop = embd_pdrop
@@ -170,7 +170,7 @@ class GPT2Config:
         self.summary_first_dropout = summary_first_dropout
         self.summary_proj_to_labels = summary_proj_to_labels
         self.scale_attn_weights = scale_attn_weights
-        self.use_cache = use_cache
+        self.use_cache: bool = use_cache
         self.scale_attn_by_inverse_layer_idx = scale_attn_by_inverse_layer_idx
         self.reorder_and_upcast_attn = reorder_and_upcast_attn
 
@@ -183,11 +183,15 @@ class GPT2Config:
         self.add_cross_attention = False
         self.output_attentions = False
         self.output_hidden_states = False
+    
+    def __setattr__(self, key, value):
+        super().__setitem__(key, value)
+        super().__setattr__(key, value)
 
 
 class Conv1D(nn.Module):
     """
-    1D-convolutional layer as defined by Radford et al. for OpenAI GPT (and also used in GPT-2).
+    1D-convolutional layer as defined by Radford et al. for OpenAI GPT2Model (and also used in GPT2Model-2).
 
     Basically works like a linear layer but the weights are transposed.
 
@@ -212,7 +216,7 @@ class Conv1D(nn.Module):
 
 class NewGELUActivation(nn.Module):
     """
-    Implementation of the GELU activation function currently in Google BERT repo (identical to OpenAI GPT). Also see
+    Implementation of the GELU activation function currently in Google BERT repo (identical to OpenAI GPT2Model). Also see
     the Gaussian Error Linear Units paper: https://arxiv.org/abs/1606.08415
     """
 
@@ -268,7 +272,7 @@ class GPT2Attention(nn.Module):
 
         self.pruned_heads = set()
 
-    def _attn(self, query, key, value, attention_mask=None, head_mask=None):
+    def _attn(self, query, key, value):
         attn_weights = torch.matmul(query, key.transpose(-1, -2))
 
         if self.scale_attn_weights:
@@ -284,7 +288,7 @@ class GPT2Attention(nn.Module):
         causal_mask = self.bias[
             :, :, key_length - query_length : key_length, :key_length
         ]
-        mask_value = torch.finfo(attn_weights.dtype).min
+        mask_value = -3.4028234663852886e+38 # torch.finfo(attn_weights.dtype).min
         # Need to be a tensor, otherwise we get error: `RuntimeError: expected scalar type float but found double`.
         # Need to be on the same device, otherwise `RuntimeError: ..., x and y to be on the same device`
         mask_value = torch.full([], mask_value, dtype=attn_weights.dtype).to(
@@ -304,15 +308,14 @@ class GPT2Attention(nn.Module):
 
         return attn_output, attn_weights
 
-    def _split_heads(self, tensor, num_heads, attn_head_size):
+    def _split_heads(self, tensor, num_heads: int, attn_head_size: int):
         """
         Splits hidden_size dim into attn_head_size and num_heads
         """
-        new_shape = tensor.size()[:-1] + (num_heads, attn_head_size)
-        tensor = tensor.view(new_shape)
+        tensor = tensor.view(tensor.size()[:-1]+(num_heads, attn_head_size))
         return tensor.permute(0, 2, 1, 3)  # (batch, head, seq_length, head_features)
 
-    def _merge_heads(self, tensor, num_heads, attn_head_size):
+    def _merge_heads(self, tensor, num_heads: int, attn_head_size: int):
         """
         Merges attn_head_size dim and num_attn_heads dim into hidden_size
         """
@@ -322,15 +325,15 @@ class GPT2Attention(nn.Module):
 
     def forward(
         self,
-        hidden_states: Optional[Tuple[torch.FloatTensor]],
+        hidden_states,
         layer_past: Optional[Tuple[torch.Tensor]] = None,
-        attention_mask: Optional[torch.FloatTensor] = None,
+        attention_mask: torch.FloatTensor = None,
         head_mask: Optional[torch.FloatTensor] = None,
         encoder_hidden_states: Optional[torch.Tensor] = None,
         encoder_attention_mask: Optional[torch.FloatTensor] = None,
         use_cache: Optional[bool] = False,
         output_attentions: Optional[bool] = False,
-    ) -> Tuple[Union[torch.Tensor, Tuple[torch.Tensor]], ...]:
+    ):
         query, key, value = self.c_attn(hidden_states).split(self.split_size, dim=2)
 
         query = self._split_heads(query, self.num_heads, self.head_dim)
@@ -343,7 +346,7 @@ class GPT2Attention(nn.Module):
             present = None
 
         attn_output, attn_weights = self._attn(
-            query, key, value, attention_mask, head_mask
+            query, key, value
         )
 
         attn_output = self._merge_heads(attn_output, self.num_heads, self.head_dim)
@@ -364,7 +367,7 @@ class GPT2MLP(nn.Module):
         self.dropout = nn.Dropout(config.resid_pdrop)
 
     def forward(
-        self, hidden_states: Optional[Tuple[torch.FloatTensor]]
+        self, hidden_states
     ) -> torch.FloatTensor:
         hidden_states = self.c_fc(hidden_states)
         hidden_states = self.act(hidden_states)
@@ -384,27 +387,17 @@ class GPT2Block(nn.Module):
         self.ln_2 = nn.LayerNorm(hidden_size, eps=config.layer_norm_epsilon)
         self.mlp = GPT2MLP(inner_dim, config)
 
+    @torch.jit.ignore()
     def forward(
         self,
-        hidden_states: Optional[Tuple[torch.FloatTensor]],
-        layer_past: Optional[Tuple[torch.Tensor]] = None,
-        attention_mask: Optional[torch.FloatTensor] = None,
-        head_mask: Optional[torch.FloatTensor] = None,
-        encoder_hidden_states: Optional[torch.Tensor] = None,
-        encoder_attention_mask: Optional[torch.FloatTensor] = None,
+        hidden_states,
         use_cache: Optional[bool] = False,
         output_attentions: Optional[bool] = False,
-    ) -> Union[
-        Tuple[torch.Tensor],
-        Optional[Tuple[torch.Tensor, Tuple[torch.FloatTensor, ...]]],
-    ]:
+    ):
         residual = hidden_states
         hidden_states = self.ln_1(hidden_states)
         attn_outputs = self.attn(
             hidden_states,
-            layer_past=layer_past,
-            attention_mask=attention_mask,
-            head_mask=head_mask,
             use_cache=use_cache,
             output_attentions=output_attentions,
         )
@@ -452,41 +445,22 @@ class GPT2Model(nn.Module):
 
     def forward(
         self,
-        input_ids: Optional[torch.LongTensor] = None,
-        past_key_values: Optional[Tuple[Tuple[torch.Tensor]]] = None,
-        attention_mask: Optional[torch.FloatTensor] = None,
-        token_type_ids: Optional[torch.LongTensor] = None,
-        position_ids: Optional[torch.LongTensor] = None,
-        head_mask: Optional[torch.FloatTensor] = None,
-        inputs_embeds: Optional[torch.FloatTensor] = None,
-        encoder_hidden_states: Optional[torch.Tensor] = None,
-        encoder_attention_mask: Optional[torch.FloatTensor] = None,
-        use_cache: Optional[bool] = None,
-        output_attentions: Optional[bool] = None,
-        output_hidden_states: Optional[bool] = None,
-        return_dict: Optional[bool] = None,
-    ) -> Tuple:
-        use_cache = use_cache if use_cache is not None else self.config.use_cache
+        inputs_embeds: torch.FloatTensor,
+    ):
+        # use_cache = use_cache if use_cache is not None else self.config.use_cache
 
-        if inputs_embeds is None:
-            raise ValueError("You have to specify either input_ids or inputs_embeds")
         input_shape = inputs_embeds.size()[:-1]
 
-        device = input_ids.device if input_ids is not None else inputs_embeds.device
+        device = inputs_embeds.device
 
-        if past_key_values is None:
-            past_length = 0
-            past_key_values = tuple([None] * len(self.h))
-        else:
-            past_length = past_key_values[0][0].size(-2)
-        if position_ids is None:
-            position_ids = torch.arange(
-                past_length,
-                input_shape[-1] + past_length,
-                dtype=torch.long,
-                device=device,
-            )
-            position_ids = position_ids.unsqueeze(0).view(-1, input_shape[-1])
+        past_length = 0
+        position_ids = torch.arange(
+            past_length,
+            input_shape[-1] + past_length,
+            dtype=torch.long,
+            device=device,
+        )
+        position_ids = position_ids.unsqueeze(0).view(-1, input_shape[-1])
 
         position_embeds = self.wpe(position_ids)
         hidden_states = inputs_embeds + position_embeds
@@ -495,28 +469,20 @@ class GPT2Model(nn.Module):
 
         output_shape = input_shape + (hidden_states.size(-1),)
 
-        presents = () if use_cache else None
-        for i, (block, layer_past) in enumerate(zip(self.h, past_key_values)):
+        for i, block in enumerate(self.h):
             # Model parallel
             outputs = block(
                 hidden_states,
-                layer_past=layer_past,
-                use_cache=use_cache,
+                use_cache=False,
+                output_attentions=False
             )
 
             hidden_states = outputs[0]
-            if use_cache is True:
-                presents = presents + (outputs[1],)
 
         hidden_states = self.ln_f(hidden_states)
 
         hidden_states = hidden_states.view(output_shape)
         # Add last hidden state
-        return tuple(
-            v
-            for v in [
-                hidden_states,
-                presents,
-            ]
-            if v is not None
+        return (
+            hidden_states,
         )

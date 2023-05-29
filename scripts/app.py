@@ -26,7 +26,7 @@ LATENT_MODES = [
 def main():
     conf = TortoiseConfig()
     ar_checkpoint = st_file_selector(
-        st, path=conf.AR_CHECKPOINT, label="Select GPT Checkpoint", key="pth"
+        st, path=conf.AR_CHECKPOINT, label="Select GPT2Model Checkpoint", key="pth"
     )
     diff_checkpoint = st_file_selector(
         st,

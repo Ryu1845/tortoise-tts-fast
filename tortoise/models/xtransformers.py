@@ -71,8 +71,8 @@ def group_dict_by_key(cond, d):
     return (*return_val,)
 
 
-def string_begins_with(prefix, str):
-    return str.startswith(prefix)
+def string_begins_with(prefix, string):
+    return string.startswith(prefix)
 
 
 def groupby_prefix_and_trim(prefix, d):
@@ -254,97 +254,43 @@ class Attention(nn.Module):
         dim_head=DEFAULT_DIM_HEAD,
         heads=8,
         causal=False,
-        talking_heads=False,
-        head_scale=False,
-        collab_heads=False,
-        collab_compression=0.3,
-        sparse_topk=None,
-        use_entmax15=False,
-        num_mem_kv=0,
         dropout=0.0,
         on_attn=False,
-        gate_values=False,
-        zero_init_output=False,
-        max_attend_past=None,
-        qk_norm=False,
-        scale_init_value=None,
-        rel_pos_bias=False,
-        rel_pos_num_buckets=32,
-        rel_pos_max_distance=128,
     ):
         super().__init__()
         self.scale = dim_head**-0.5
 
         self.heads = heads
-        self.causal = causal
-        self.max_attend_past = max_attend_past
 
         qk_dim = v_dim = dim_head * heads
 
         # collaborative heads
-        self.collab_heads = collab_heads
         self.to_q = nn.Linear(dim, qk_dim, bias=False)
         self.to_k = nn.Linear(dim, qk_dim, bias=False)
         self.to_v = nn.Linear(dim, v_dim, bias=False)
 
         self.dropout = nn.Dropout(dropout)
 
-        # add GLU gating for aggregated values, from alphafold2
-        self.to_v_gate = None
-
-        # cosine sim attention
-        self.qk_norm = qk_norm
-        # talking heads
-        self.talking_heads = talking_heads
-        # head scaling
-        self.head_scale = head_scale
-        # explicit topk sparse attention
-        self.sparse_topk = sparse_topk
-
         # entmax
         self.attn_fn = F.softmax
 
-        # add memory key / values
-        self.num_mem_kv = num_mem_kv
-        # attention on attention
-        self.attn_on_attn = on_attn
         self.to_out = (
             nn.Sequential(nn.Linear(v_dim, dim * 2), nn.GLU())
             if on_attn
             else nn.Linear(v_dim, dim)
         )
 
-        self.rel_pos_bias = rel_pos_bias
-
     def forward(
         self,
         x,
-        context=None,
         mask=None,
-        context_mask=None,
-        attn_mask=None,
-        sinusoidal_emb=None,
         rotary_pos_emb=None,
-        prev_attn=None,
-        mem=None,
-        layer_past=None,
     ):
-        (
-            b,
-            n,
-            _,
-            h,
-            scale,
-            device,
-            has_context,
-        ) = (
-            *x.shape,
-            self.heads,
-            self.scale,
-            x.device,
-            exists(context),
-        )
-        kv_input = default(context, x)
+        h = self.heads
+        scale = self.scale
+        device = x.device
+        b, n, _ = tuple(x.shape)
+        kv_input = x
 
         q_input = x
         k_input = kv_input
@@ -358,7 +304,7 @@ class Attention(nn.Module):
         k_cache = k
         v_cache = v
 
-        if exists(rotary_pos_emb) and not has_context:
+        if exists(rotary_pos_emb):
             l = rotary_pos_emb.shape[-1]
             (ql, qr), (kl, kr), (vl, vr) = map(
                 lambda t: (t[..., :l], t[..., l:]), (q, k, v)
@@ -371,9 +317,9 @@ class Attention(nn.Module):
             )
 
         input_mask = None
-        if any(map(exists, (mask, context_mask))):
+        if any(map(exists, (mask,))):
             q_mask = default(mask, lambda: torch.ones((b, n), device=device).bool())
-            k_mask = q_mask if not exists(context) else context_mask
+            k_mask = q_mask
             k_mask = default(
                 k_mask, lambda: torch.ones((b, k.shape[-2]), device=device).bool()
             )
@@ -569,9 +515,6 @@ class AttentionLayers(nn.Module):
         for ind, (layer_type, (norm, block, residual_fn)) in enumerate(
             zip(self.layer_types, self.layers)
         ):
-            if layer_type == "a":
-                layer_mem = mems.pop(0) if mems else None
-
             residual = x
 
             pre_branch_norm, post_branch_norm, post_main_norm = norm
@@ -579,21 +522,11 @@ class AttentionLayers(nn.Module):
             if exists(pre_branch_norm):
                 x = pre_branch_norm(x, **norm_args)
 
-            if layer_type == "a" or layer_type == "c":
-                layer_past = None
-
             if layer_type == "a":
                 out, inter, k, v = block(
                     x,
-                    None,
                     mask,
-                    None,
-                    attn_mask,
-                    self.pia_pos_emb,
                     rotary_pos_emb,
-                    prev_attn,
-                    layer_mem,
-                    layer_past,
                 )
             elif layer_type == "f":
                 out = block(x)

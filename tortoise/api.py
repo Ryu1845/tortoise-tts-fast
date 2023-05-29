@@ -221,6 +221,7 @@ class TextToSpeech:
             ar_path = ar_checkpoint or get_model_path("autoregressive.pth", models_dir)
             self.autoregressive.load_state_dict(torch.load(ar_path), strict=False)
             self.autoregressive.post_init_gpt2_config(kv_cache)
+            self.autoregressive = torch.jit.script( self.autoregressive )
 
             diff_path = diff_checkpoint or get_model_path(
                 "diffusion_decoder.pth", models_dir
@@ -598,18 +599,17 @@ class TextToSpeech:
             ) as autoregressive, torch.autocast(
                 device_type="cuda", dtype=torch.float16, enabled=half
             ):
-                for b in tqdm(range(num_batches), disable=not verbose):
+                for _b in tqdm(range(num_batches), disable=not verbose):
                     codes = autoregressive.inference_speech(
                         auto_conditioning,
                         text_tokens,
+                        num_return_sequences=self.autoregressive_batch_size,
+                        max_generate_length=max_mel_tokens,
                         do_sample=True,
                         top_p=top_p,
                         temperature=temperature,
-                        num_return_sequences=self.autoregressive_batch_size,
                         length_penalty=length_penalty,
                         repetition_penalty=repetition_penalty,
-                        max_generate_length=max_mel_tokens,
-                        **hf_generate_kwargs,
                     )
                     padding_needed = max_mel_tokens - codes.shape[1]
                     codes = F.pad(codes, (0, padding_needed), value=stop_mel_token)
